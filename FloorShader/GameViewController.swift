@@ -41,7 +41,7 @@ class GameViewController: NSViewController {
         program.vertexFunctionName = "floor_vertex"
         program.delegate = self
         
-        let floor = SCNPlane(width: 1, height: 1)
+        let floor = SCNPlane(width: 10, height: 10)
         
         floor.program = program
         
