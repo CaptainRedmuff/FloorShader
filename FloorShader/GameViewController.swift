@@ -41,7 +41,7 @@ class GameViewController: NSViewController {
         program.vertexFunctionName = "floor_vertex"
         program.delegate = self
         
-        let floor = SCNPlane(width: 10, height: 10)
+        let floor = SCNPlane(width: 2, height: 2)
         
         floor.program = program
         
@@ -51,7 +51,9 @@ class GameViewController: NSViewController {
         //  setup scene and add child nodes
         //
         
-        let boxNode = SCNNode(geometry: SCNBox(width: 1, height: 1, length: 1, chamferRadius: 0))
+        let boxNode = SCNNode(geometry: SCNBox(width: 0.5, height: 1, length: 0.5, chamferRadius: 0))
+        
+        boxNode.position = SCNVector3(x: 0.0, y: 0.5, z: 0.0)
         
         sceneView.scene = SCNScene()
         sceneView.allowsCameraControl = true
