@@ -8,19 +8,9 @@
 
 #include <metal_stdlib>
 using namespace metal;
-
 #include <SceneKit/scn_metal>
 
-struct NodeBuffer {
-    
-    float4x4 modelTransform;
-    float4x4 inverseModelTransform;
-    float4x4 modelViewTransform;
-    float4x4 inverseModelViewTransform;
-    float4x4 normalTransform;
-    float4x4 modelViewProjectionTransform;
-    float4x4 inverseModelViewProjectionTransform;
-};
+constant float epsilon = 0.0001;
 
 struct Plane {
     
@@ -36,84 +26,95 @@ struct Ray {
 
 struct RayHitTest {
     
-    bool hit;
     float3 vector;
     float distance;
+    bool hit;
 };
 
-typedef struct {
+struct NodeBuffer {
+    
+    float4x4 modelTransform;
+    float4x4 modelViewTransform;
+    float4x4 normalTransform;
+    float4x4 modelViewProjectionTransform;
+};
+
+struct Vertex {
     
     float3 position [[ attribute(SCNVertexSemanticPosition) ]];
-    
-} Vertex;
+};
 
 struct Fragment {
     
     float4 position [[position]];
-    float3 coordinate [[user(gridPosition)]];
+    float2 ij;
     
-    bool hit [[user(hit)]];
+    float worldFloor;
+    
+    half4 backgroundColor;
+    half4 gridColor;
 };
-
-constant float epsilon = 0.0001;
-constant half4 gridColor = half4(half3(0.35), 1.0);
-constant half4 worldColor = half4(half3(0.0), 1.0);
-constant Plane plane = Plane { .position =  float3(0.0), .normal = float3(0.0, 1.0, 0.0) };
 
 RayHitTest intersect(Plane plane, Ray ray) {
     
     float denominator = dot(plane.normal, ray.direction);
     
-    if (fabs(denominator) > epsilon) {
+    if (fabs(denominator) < epsilon) {
         
-        float3 difference = normalize(plane.position - ray.origin);
-        
-        float distance = dot(difference, plane.normal) / denominator;
-        
-        if (distance > epsilon) {
-            
-            return RayHitTest { .hit = true, .distance = distance, .vector = ray.origin + (ray.direction * distance) };
-        }
+        return RayHitTest { .hit = false };
     }
+        
+    float3 v0 = (plane.position - ray.origin);
     
-    return RayHitTest { .hit = false };
+    float distance = dot(v0, plane.normal) / denominator;
+    
+    return RayHitTest { .hit = distance > epsilon, .distance = distance, .vector = ray.origin + (ray.direction * distance) };
 }
 
-vertex Fragment floor_vertex(Vertex v [[ stage_in ]], constant SCNSceneBuffer& scn_frame [[buffer(0)]], constant NodeBuffer& scn_node [[buffer(1)]]) {
-    
-    float4 position = scn_frame.inverseProjectionTransform * float4(v.position, 1.0);
-    
-    float3 camera = float3(0.0);
-    
-    float3 direction = normalize(position.xyz - camera);
-    
-    Ray ray = Ray { .origin = float3(0.0), .direction = direction };
-    
-    RayHitTest hitTest = intersect(plane, ray);
+vertex Fragment floor_vertex(Vertex v [[ stage_in ]]) {
     
     Fragment f;
     
     f.position = float4(v.position, 1.0);
-    f.coordinate = hitTest.vector;
-    f.hit = hitTest.hit;
+    f.ij = v.position.xy;
+    f.backgroundColor = half4(0.0, 0.0, 0.0, 1.0);
+    f.gridColor = half4(1.0);
     
     return f;
 }
 
-fragment half4 floor_fragment(Fragment f [[stage_in]]) {
+fragment half4 floor_fragment(Fragment f [[stage_in]], constant SCNSceneBuffer& scn_frame [[buffer(0)]], constant NodeBuffer& scn_node [[buffer(1)]]) {
     
-    if (!f.hit) {
+    //f.ij is in the vertex position in clip space (-1, -1) to (1, 1)
+    
+    //convert position into camera space
+    float4 position = (scn_frame.inverseViewProjectionTransform * float4(f.ij.x, f.ij.y, 0.0, 1.0));
+
+    //create ray from camera with direction
+    Ray ray = Ray { .origin = float3(0.0), .direction = normalize(position.xyz) };
+    
+    //convert floor plane from world space to camera space
+    float3 worldFloor = (scn_node.modelViewTransform * float4(float3(0.0, -5.0, 0.0), 1.0)).xyz;
+    
+    //hit test ray against floor plane
+    Plane plane = Plane { .position = worldFloor, .normal = float3(0.0, 1.0, 0.0) };
+
+    RayHitTest hitTest = intersect(plane, ray);
+
+    if(!hitTest.hit) {
         
-        return worldColor;
+        return f.backgroundColor;
     }
     
-    float2 position = f.coordinate.xz;
-    float2 fractional  = abs(fract(position + 0.5));
-    float2 partial = fwidth(position);
+    //grab xz values to determine floor fragment color
+    float2 uv = hitTest.vector.xz;
+    
+    float2 fractional  = abs(fract(uv + 0.5));
+    float2 partial = fwidth(uv);
     
     float2 point = smoothstep(-partial, partial, fractional);
     
     float saturation = 1.0 - saturate(point.x * point.y);
     
-    return half4(mix(gridColor.rgb, worldColor.rgb, saturation), 1.0);
+    return half4(mix(f.backgroundColor.rgb, f.gridColor.rgb, saturation), 1.0);
 }
